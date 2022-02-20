@@ -9,6 +9,7 @@ from pingouin.parametric import anova
 from pingouin.multicomp import multicomp
 from pingouin.effsize import compute_effsize, convert_effsize
 from pingouin.utils import (_check_dataframe, _flatten_list, _postprocess_dataframe)
+from scipy.stats import studentized_range
 
 __all__ = ["pairwise_ttests", "pairwise_tukey", "pairwise_gameshowell",
            "pairwise_corr"]
@@ -172,8 +173,8 @@ def pairwise_ttests(data=None, dv=None, between=None, within=None, subject=None,
 
     >>> import pandas as pd
     >>> import pingouin as pg
-    >>> pd.set_option('expand_frame_repr', False)
-    >>> pd.set_option('max_columns', 20)
+    >>> pd.set_option('display.expand_frame_repr', False)
+    >>> pd.set_option('display.max_columns', 20)
     >>> df = pg.read_dataset('mixed_anova.csv')
     >>> pg.pairwise_ttests(dv='Scores', between='Group', data=df).round(3)
       Contrast        A           B  Paired  Parametric     T    dof alternative  p-unc   BF10  hedges
@@ -425,11 +426,12 @@ def pairwise_ttests(data=None, dv=None, between=None, within=None, subject=None,
             else:
                 tmp = data
             # Recursive call to pairwise_ttests
-            stats = stats.append(pairwise_ttests(
+            pt = pairwise_ttests(
                 dv=dv, between=fbt[i], within=fwt[i], subject=subject, data=tmp,
                 parametric=parametric, marginal=marginal, alpha=alpha, alternative=alternative,
                 padjust=padjust, effsize=effsize, correction=correction, nan_policy=nan_policy,
-                return_desc=return_desc), ignore_index=True, sort=False)
+                return_desc=return_desc)
+            stats = pd.concat([stats, pt], axis=0, ignore_index=True, sort=False)
 
         # Then compute the interaction between the factors
         if interaction:
@@ -458,8 +460,8 @@ def pairwise_ttests(data=None, dv=None, between=None, within=None, subject=None,
 
             # Append empty rows
             idxiter = np.arange(nrows, nrows + ncombs)
-            stats = stats.append(
-                pd.DataFrame(columns=stats.columns, index=idxiter), ignore_index=True)
+            stats = stats.reindex(stats.index.union(idxiter))
+
             # Update other columns
             stats.loc[idxiter, 'Contrast'] = factors[0] + ' * ' + factors[1]
             stats.loc[idxiter, 'Time'] = combs[:, 0]
@@ -607,12 +609,6 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize='hedges'):
     :math:`Q(\\sqrt2|t_i|, r, N - r)` where :math:`r` is the total number of
     groups and :math:`N` is the total sample size.
 
-    .. warning:: Versions of Pingouin below 0.3.10 used a wrong algorithm for
-        the studentized range approximation [2]_, which resulted in (slightly)
-        incorrect p-values. Please make sure you're using the
-        LATEST VERSION of Pingouin, and always DOUBLE CHECK your results with
-        another statistical software.
-
     References
     ----------
     .. [1] Tukey, John W. "Comparing individual means in the analysis of
@@ -630,12 +626,10 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize='hedges'):
     >>> df = pg.read_dataset('penguins')
     >>> df.pairwise_tukey(dv='body_mass_g', between='species').round(3)
                A          B   mean(A)   mean(B)      diff      se       T  p-tukey  hedges
-    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  67.512  -0.480    0.869  -0.070
-    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  56.148 -24.495    0.001  -2.967
-    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  69.857 -19.224    0.001  -2.894
+    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  67.512  -0.480    0.881  -0.070
+    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  56.148 -24.495    0.000  -2.967
+    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  69.857 -19.224    0.000  -2.894
     """
-    from statsmodels.stats.libqsturng import psturng
-
     # First compute the ANOVA
     # For max precision, make sure rounding is disabled
     old_options = options.copy()
@@ -662,9 +656,9 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize='hedges'):
     tval = mn / se
 
     # Critical values and p-values
-    # from statsmodels.stats.libqsturng import qsturng
-    # crit = qsturng(1 - alpha, ng, df) / np.sqrt(2)
-    pval = psturng(np.sqrt(2) * np.abs(tval), ng, df)
+    # crit = studentized_range.ppf(1 - alpha, ng, df) / np.sqrt(2)
+    pval = studentized_range.sf(np.sqrt(2) * np.abs(tval), ng, df)
+    pval = np.clip(pval, 0, 1)
 
     # Uncorrected p-values
     # from scipy.stats import t
@@ -760,12 +754,6 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize='hedges'):
     The p-values are then approximated using the Studentized range distribution
     :math:`Q(\\sqrt2|t_i|, r, v_i)`.
 
-    .. warning:: Versions of Pingouin below 0.3.10 used a wrong algorithm for
-        the studentized range approximation [2]_, which resulted in (slightly)
-        incorrect p-values. Please make sure you're using the
-        LATEST VERSION of Pingouin, and always DOUBLE CHECK your results with
-        another statistical software.
-
     References
     ----------
     .. [1] Games, Paul A., and John F. Howell. "Pairwise multiple comparison
@@ -784,13 +772,11 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize='hedges'):
     >>> df = pg.read_dataset('penguins')
     >>> pg.pairwise_gameshowell(data=df, dv='body_mass_g',
     ...                         between='species').round(3)
-               A          B   mean(A)   mean(B)      diff      se       T       df   pval  hedges
-    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  59.706  -0.543  152.455  0.834  -0.079
-    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  58.811 -23.386  249.643  0.001  -2.833
-    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  65.103 -20.628  170.404  0.001  -3.105
+               A          B   mean(A)   mean(B)      diff      se       T       df  pval  hedges
+    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  59.706  -0.543  152.455  0.85  -0.079
+    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  58.811 -23.386  249.643  0.00  -2.833
+    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  65.103 -20.628  170.404  0.00  -3.105
     """
-    from statsmodels.stats.libqsturng import psturng
-
     # Check the dataframe
     _check_dataframe(dv=dv, between=between, effects='between', data=data)
 
@@ -820,7 +806,8 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize='hedges'):
           (((gvars[g2] / n[g2])**2) / (n[g2] - 1)))
 
     # Compute corrected p-values
-    pval = psturng(np.sqrt(2) * np.abs(tval), ng, df)
+    pval = studentized_range.sf(np.sqrt(2) * np.abs(tval), ng, df)
+    pval = np.clip(pval, 0, 1)
 
     # Uncorrected p-values
     # from scipy.stats import t
@@ -956,8 +943,8 @@ def pairwise_corr(data, columns=None, covar=None, alternative='two-sided',
 
     >>> import pandas as pd
     >>> import pingouin as pg
-    >>> pd.set_option('expand_frame_repr', False)
-    >>> pd.set_option('max_columns', 20)
+    >>> pd.set_option('display.expand_frame_repr', False)
+    >>> pd.set_option('display.max_columns', 20)
     >>> data = pg.read_dataset('pairwise_corr').iloc[:, 1:]
     >>> pg.pairwise_corr(data, method='spearman', alternative='greater', padjust='bonf').round(3)
                    X                  Y    method alternative    n      r         CI95%  p-unc  p-corr p-adjust  power

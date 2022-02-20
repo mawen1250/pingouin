@@ -371,10 +371,9 @@ def qqplot(x, dist='norm', sparams=(), confidence=.95, figsize=(5, 4),
 
     ax.plot(theor, observed, 'bo')
 
-    stats.morestats._add_axis_labels_title(ax,
-                                           xlabel='Theoretical quantiles',
-                                           ylabel='Ordered quantiles',
-                                           title='Q-Q Plot')
+    ax.set_xlabel('Theoretical quantiles')
+    ax.set_ylabel('Ordered quantiles')
+    ax.set_title('Q-Q Plot')
 
     # Add diagonal line
     end_pts = [ax.get_xlim(), ax.get_ylim()]
