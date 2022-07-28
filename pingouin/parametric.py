@@ -1,5 +1,6 @@
 # Author: Raphael Vallat <raphaelvallat9@gmail.com>
 import warnings
+import time
 import numpy as np
 import pandas as pd
 from scipy.stats import f
@@ -15,6 +16,42 @@ from pingouin import (
 )
 
 __all__ = ["ttest", "rm_anova", "anova", "welch_anova", "mixed_anova", "ancova"]
+
+
+# Fast numpy implement to replace pandas groupby
+# http://esantorella.com/2016/06/16/groupby/
+class Groupby:
+    def __init__(self, keys):
+        _, self.keys_as_int = np.unique(keys, return_inverse=True)
+        self.n_keys = max(self.keys_as_int) + 1
+        self.set_indices()
+
+    def set_indices(self):
+        indices = [[] for i in range(self.n_keys)]
+        for i, k in enumerate(self.keys_as_int):
+            indices[k].append(i)
+        self.indices = [np.array(elt) for elt in indices]
+        self.counts = np.array([len(elt) for elt in indices])
+
+    def apply(self, function, values, broadcast=True):
+        if broadcast:
+            result = np.zeros(len(values))
+            for idx in self.indices:
+                result[idx] = function(values[idx])
+        else:
+            result = np.zeros(self.n_keys)
+            for k, idx in enumerate(self.indices):
+                result[k] = function(values[idx])
+        return result
+
+    def count(self):
+        return self.counts
+
+    def mean(self, values):
+        return self.apply(np.mean, values, broadcast=False)
+
+    def sum(self, values):
+        return self.apply(np.sum, values, broadcast=False)
 
 
 def ttest(x, y, paired=False, alternative="two-sided", correction="auto", r=0.707, confidence=0.95):
@@ -983,15 +1020,37 @@ def anova(data=None, dv=None, between=None, ss_type=2, detailed=False, effsize="
     n_groups = data[between].nunique()
     N = data[dv].size
 
-    # Calculate sums of squares
+    # Calculate sums of squares (Pandas)
+    tick = time.time()
     grp = data.groupby(between, observed=True)[dv]
+    print(f'(Pandas) groupby: {time.time() - tick} s')
     # Between effect
+    tick = time.time()
     ssbetween = ((grp.mean() - data[dv].mean()) ** 2 * grp.count()).sum()
+    print(f'(Pandas) ssbetween={ssbetween}: {time.time() - tick} s')
     # Within effect (= error between)
     #  = (grp.var(ddof=0) * grp.count()).sum()
+    tick = time.time()
     sserror = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
+    print(f'(Pandas) sserror={sserror}: {time.time() - tick} s')
     # In 1-way ANOVA, sstotal = ssbetween + sserror
     # sstotal = ssbetween + sserror
+
+    # Calculate sums of squares (Numpy)
+    tick = time.time()
+    keys = data[between[0] if isinstance(between, list) else between].to_numpy()
+    values = data[dv].to_numpy()
+    grp = Groupby(keys)
+    print(f'(Numpy) groupby: {time.time() - tick} s')
+    # Between effect
+    tick = time.time()
+    ssbetween = (np.square(grp.mean(values) - values.mean()) * grp.count()).sum()
+    print(f'(Numpy) ssbetween={ssbetween}: {time.time() - tick} s')
+    # Within effect (= error between)
+    #  = (grp.var(ddof=0) * grp.count()).sum()
+    tick = time.time()
+    sserror = grp.apply(lambda x: np.square(x - x.mean()), values).sum()
+    print(f'(Numpy) sserror={sserror}: {time.time() - tick} s')
 
     # Calculate DOF, MS, F and p-values
     ddof1 = n_groups - 1
@@ -1068,7 +1127,9 @@ def anova2(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
         ss_fac1 = aov_fac1.at[0, "SS"]
         ss_fac2 = aov_fac2.at[0, "SS"]
         ss_tot = ((data[dv] - data[dv].mean()) ** 2).sum()
+        tick = time.time()
         ss_resid = np.sum(grp_both.apply(lambda x: (x - x.mean()) ** 2))
+        print(f'(Pandas) ss_resid={ss_resid}: {time.time() - tick} s')
         ss_inter = ss_tot - (ss_resid + ss_fac1 + ss_fac2)
         # Degrees of freedom
         df_fac1 = aov_fac1.at[0, "DF"]
@@ -1084,6 +1145,7 @@ def anova2(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
     ms_fac2 = ss_fac2 / df_fac2
     ms_inter = ss_inter / df_inter
     ms_resid = ss_resid / df_resid
+    print(f'ss_resid={ss_resid} ({type(ss_resid)}), df_resid={df_resid} ({type(df_resid)}), ms_resid={ms_resid} ({type(ms_resid)})')
 
     # F-values
     fval_fac1 = ms_fac1 / ms_resid
