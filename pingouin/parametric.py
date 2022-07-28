@@ -1020,37 +1020,25 @@ def anova(data=None, dv=None, between=None, ss_type=2, detailed=False, effsize="
     n_groups = data[between].nunique()
     N = data[dv].size
 
-    # Calculate sums of squares (Pandas)
-    tick = time.time()
-    grp = data.groupby(between, observed=True)[dv]
-    print(f'(Pandas) groupby: {time.time() - tick} s')
-    # Between effect
-    tick = time.time()
-    ssbetween = ((grp.mean() - data[dv].mean()) ** 2 * grp.count()).sum()
-    print(f'(Pandas) ssbetween={ssbetween}: {time.time() - tick} s')
-    # Within effect (= error between)
-    #  = (grp.var(ddof=0) * grp.count()).sum()
-    # tick = time.time()
-    # sserror = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
-    # print(f'(Pandas) sserror={sserror}: {time.time() - tick} s')
-    # In 1-way ANOVA, sstotal = ssbetween + sserror
-    # sstotal = ssbetween + sserror
-
     # Calculate sums of squares (Numpy)
-    tick = time.time()
     keys = data[between[0] if isinstance(between, list) else between].to_numpy()
     values = data[dv].to_numpy()
     grp = Groupby(keys)
-    print(f'(Numpy) groupby: {time.time() - tick} s')
     # Between effect
-    # tick = time.time()
     # ssbetween = (np.square(grp.mean(values) - values.mean()) * grp.count()).sum()
-    # print(f'(Numpy) ssbetween={ssbetween}: {time.time() - tick} s')
     # Within effect (= error between)
     #  = (grp.var(ddof=0) * grp.count()).sum()
-    tick = time.time()
     sserror = grp.apply(lambda x: np.square(x - x.mean()), values).sum()
-    print(f'(Numpy) sserror={sserror}: {time.time() - tick} s')
+
+    # Calculate sums of squares (Pandas)
+    grp = data.groupby(between, observed=True)[dv]
+    # Between effect
+    ssbetween = ((grp.mean() - data[dv].mean()) ** 2 * grp.count()).sum()
+    # Within effect (= error between)
+    #  = (grp.var(ddof=0) * grp.count()).sum()
+    # sserror = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
+    # In 1-way ANOVA, sstotal = ssbetween + sserror
+    # sstotal = ssbetween + sserror
 
     # Calculate DOF, MS, F and p-values
     ddof1 = n_groups - 1
@@ -1127,17 +1115,14 @@ def anova2(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
         ss_fac1 = aov_fac1.at[0, "SS"]
         ss_fac2 = aov_fac2.at[0, "SS"]
         ss_tot = ((data[dv] - data[dv].mean()) ** 2).sum()
-        # tick = time.time()
         # ss_resid = np.sum(grp_both.apply(lambda x: (x - x.mean()) ** 2))
-        # print(f'(Pandas) ss_resid={ss_resid}: {time.time() - tick} s')
-        ss_resid = np.float64(0) # fast skip computing
+        ss_resid = np.float64(0) # fast skip computing | TODO: is it always 0?
         ss_inter = ss_tot - (ss_resid + ss_fac1 + ss_fac2)
         # Degrees of freedom
         df_fac1 = aov_fac1.at[0, "DF"]
         df_fac2 = aov_fac2.at[0, "DF"]
         df_inter = (ng1 - 1) * (ng2 - 1)
         df_resid = data[dv].size - (ng1 * ng2)
-        print(f'data[dv].size={data[dv].size}, ng1={ng1}, ng2={ng2}')
     else:
         # UNBALANCED DESIGN
         return anovan(dv=dv, between=between, data=data, ss_type=ss_type, effsize=effsize)
@@ -1184,10 +1169,8 @@ def anova2(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
             effsize: all_effsize,
         }
     )
-    print(aov)
 
     aov.dropna(how="all", axis=1, inplace=True)
-    print(aov)
     return _postprocess_dataframe(aov)
 
 
