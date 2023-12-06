@@ -252,6 +252,8 @@ class TestRegression(TestCase):
     def test_logistic_regression(self):
         """Test function logistic_regression."""
         # Simple regression
+        df = read_dataset("mediation")
+        df["Zero"], df["One"] = 0, 1
         lom = logistic_regression(df["X"], df["Ybin"], as_dataframe=False)
         # Compare to R
         # Reproduce in jupyter notebook with rpy2 using
@@ -347,7 +349,7 @@ class TestRegression(TestCase):
         # R: >>> glm("male ~ body_mass_kg + species", family=binomial, ...)
         #    >>> confint.default(model)  # Wald CI
         # See https://stats.stackexchange.com/a/275421/253579
-        data_dum = pd.get_dummies(data, columns=["species"], drop_first=True)
+        data_dum = pd.get_dummies(data, columns=["species"], drop_first=True, dtype=float)
         X = data_dum[["body_mass_kg", "species_Chinstrap", "species_Gentoo"]]
         y = data_dum["male"]
         lom = logistic_regression(X, y, as_dataframe=False)
@@ -359,6 +361,8 @@ class TestRegression(TestCase):
 
     def test_mediation_analysis(self):
         """Test function mediation_analysis."""
+        df = read_dataset("mediation")
+        df["Zero"], df["One"] = 0, 1
         ma = mediation_analysis(data=df, x="X", m="M", y="Y", n_boot=500)
 
         # Compare against R package mediation

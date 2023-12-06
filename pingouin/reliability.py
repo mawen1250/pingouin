@@ -140,7 +140,7 @@ def cronbach_alpha(
         data = data.dropna(axis=0, how="any")
 
     # Compute covariance matrix and Cronbach's alpha
-    C = data.cov()
+    C = data.cov(numeric_only=True)
     cronbach = (k / (k - 1)) * (1 - np.trace(C) / C.sum().sum())
     # which is equivalent to
     # v = np.diag(C).mean()
@@ -359,7 +359,7 @@ def intraclass_corr(data=None, targets=None, raters=None, ratings=None, nan_poli
     u3 = (f3u - 1) / (f3u + (k - 1))
     # Case 2
     fj = msj / mse
-    vn = df2kd * ((k * icc2 * fj + n * (1 + (k - 1) * icc2) - k * icc2)) ** 2
+    vn = df2kd * (k * icc2 * fj + n * (1 + (k - 1) * icc2) - k * icc2) ** 2
     vd = df1 * k**2 * icc2**2 * fj**2 + (n * (1 + (k - 1) * icc2) - k * icc2) ** 2
     v = vn / vd
     f2u = f.ppf(1 - alpha / 2, n - 1, v)

@@ -20,12 +20,7 @@ from .contingency import *
 from .config import *
 
 # Current version
-__version__ = "0.5.2"
-
-# Warn if a newer version of Pingouin is available
-from outdated import warn_if_outdated
-
-warn_if_outdated("pingouin", __version__)
+__version__ = "0.5.3"
 
 # load default options
 set_default_options()

@@ -58,7 +58,7 @@ def multivariate_normality(X, alpha=0.05):
     >>> data = pg.read_dataset('multivariate')
     >>> X = data[['Fever', 'Pressure', 'Aches']]
     >>> pg.multivariate_normality(X, alpha=.05)
-    HZResults(hz=0.540086101851555, pval=0.7173686509622385, normal=True)
+    HZResults(hz=0.540086101851555, pval=0.7173686509622386, normal=True)
     """
     from scipy.stats import lognorm
 
@@ -360,7 +360,7 @@ def box_m(data, dvs, group, alpha=0.001):
     # - n_dvs is the number of variables
     # - n_samp is the number of samples in each covariance matrix
     # - nobs is the total number of observations
-    covs = grp.cov()
+    covs = grp.cov(numeric_only=True)
     n_covs, n_dvs = covs.index.levshape
     n_samp = grp.count().iloc[:, 0].to_numpy()  # NaN are excluded by .count
     nobs = n_samp.sum()

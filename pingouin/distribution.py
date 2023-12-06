@@ -195,13 +195,15 @@ def normality(data, dv=None, group=None, method="shapiro", alpha=0.05):
     >>> data = pg.read_dataset('rm_anova2')
     >>> pg.normality(data, dv='Performance', group='Time')
                  W      pval  normal
+    Time
     Pre   0.967718  0.478773    True
     Post  0.940728  0.095157    True
 
     5. Same but using the Jarque-Bera test
 
     >>> pg.normality(data, dv='Performance', group='Time', method="jarque_bera")
-                W      pval   normal
+                 W      pval  normal
+    Time
     Pre   0.304021  0.858979    True
     Post  1.265656  0.531088    True
     """
@@ -235,10 +237,17 @@ def normality(data, dv=None, group=None, method="shapiro", alpha=0.05):
             assert dv in data.columns
             grp = data.groupby(group, observed=True, sort=False)
             cols = grp.groups.keys()
-            for _, tmp in grp:
-                st_grp = normality(tmp[dv].to_numpy(), method=method, alpha=alpha)
+            for idx, tmp in grp:
+                if tmp[dv].count() <= 3:
+                    warnings.warn(f"Group {idx} has less than 4 valid samples. Returning NaN.")
+                    st_grp = pd.DataFrame(
+                        {"W": np.nan, "pval": np.nan, "normal": False}, index=[idx]
+                    )
+                else:
+                    st_grp = normality(tmp[dv].to_numpy(), method=method, alpha=alpha)
                 stats = pd.concat([stats, st_grp], axis=0, ignore_index=True)
             stats.index = cols
+            stats.index.name = group
     return _postprocess_dataframe(stats)
 
 
@@ -401,47 +410,63 @@ def homoscedasticity(data, dv=None, group=None, method="levene", alpha=0.05, **k
 def anderson(*args, dist="norm"):
     """Anderson-Darling test of distribution.
 
+    The Anderson-Darling test tests the null hypothesis that a sample is drawn from a population
+    that follows a particular distribution. For the Anderson-Darling test, the critical values
+    depend on which distribution is being tested against.
+
+    This function is a wrapper around :py:func:`scipy.stats.anderson`.
+
     Parameters
     ----------
     sample1, sample2,... : array_like
-        Array of sample data. May be different lengths.
+        Array of sample data. They may be of different lengths.
     dist : string
-        Distribution ('norm', 'expon', 'logistic', 'gumbel')
+        The type of distribution to test against. The default is 'norm'.
+        Must be one of 'norm', 'expon', 'logistic', 'gumbel'.
 
     Returns
     -------
     from_dist : boolean
-        True if data comes from this distribution.
+        A boolean indicating if the data comes from the tested distribution (True) or not (False).
     sig_level : float
-        The significance levels for the corresponding critical values in %.
-        (See :py:func:`scipy.stats.anderson` for more details)
+        The significance levels for the corresponding critical values, in %.
+        See :py:func:`scipy.stats.anderson` for more details.
 
     Examples
     --------
     1. Test that an array comes from a normal distribution
 
     >>> from pingouin import anderson
-    >>> x = [2.3, 5.1, 4.3, 2.6, 7.8, 9.2, 1.4]
-    >>> anderson(x, dist='norm')
-    (False, 15.0)
+    >>> import numpy as np
+    >>> np.random.seed(42)
+    >>> x = np.random.normal(size=100)
+    >>> y = np.random.normal(size=10000)
+    >>> z = np.random.random(1000)
+    >>> anderson(x)
+    (True, 15.0)
 
-    2. Test that two arrays comes from an exponential distribution
+    2. Test that multiple arrays comes from the normal distribution
 
-    >>> y = [2.8, 12.4, 28.3, 3.2, 16.3, 14.2]
-    >>> anderson(x, y, dist='expon')
-    (array([False, False]), array([15., 15.]))
+    >>> anderson(x, y, z)
+    (array([ True,  True, False]), array([15., 15.,  1.]))
+
+    3. Test that an array comes from the exponential distribution
+
+    >>> x = np.random.exponential(size=1000)
+    >>> anderson(x, dist="expon")
+    (True, 15.0)
     """
     k = len(args)
-    from_dist = np.zeros(k, "bool")
+    from_dist = np.zeros(k, dtype="bool")
     sig_level = np.zeros(k)
     for j in range(k):
         st, cr, sig = scipy.stats.anderson(args[j], dist=dist)
-        from_dist[j] = True if (st > cr).any() else False
+        from_dist[j] = True if (st < cr).any() else False
         sig_level[j] = sig[np.argmin(np.abs(st - cr))]
 
     if k == 1:
-        from_dist = bool(from_dist)
-        sig_level = float(sig_level)
+        from_dist = from_dist[0]
+        sig_level = sig_level[0]
     return from_dist, sig_level
 
 
@@ -478,7 +503,11 @@ def _check_multilevel_rm(data, func="epsilon"):
             # We end up with a one-way design. It is similar to applying
             # a paired T-test to gain scores instead of using repeated measures
             # on two time points. Here we have computed the gain scores.
-            data = data.groupby(level=1, axis=1, observed=True).diff(axis=1).dropna(axis=1)
+            data = (
+                data.groupby(level=1, axis=1, observed=True, group_keys=False)
+                .diff(axis=1)
+                .dropna(axis=1)
+            )
             data = data.droplevel(level=0, axis=1)
         else:
             # Both factors have more than 2 levels -- differ from R / JASP
@@ -651,17 +680,16 @@ def epsilon(data, dv=None, within=None, subject=None, correction="gg"):
     levels:
 
     >>> # Pivot from long-format to wide-format
-    >>> piv = data.pivot_table(index='Subject', columns=['Time', 'Metric'],
-    ...                        values='Performance')
+    >>> piv = data.pivot(index='Subject', columns=['Time', 'Metric'], values='Performance')
     >>> piv.head()
-    Time      Post                   Pre
-    Metric  Action Client Product Action Client Product
+    Time        Pre                  Post
+    Metric  Product Client Action Product Client Action
     Subject
-    1           34     30      18     17     12      13
-    2           30     18       6     18     19      12
-    3           32     31      21     24     19      17
-    4           40     39      18     25     25      12
-    5           27     28      18     19     27      19
+    1            13     12     17      18     30     34
+    2            12     19     18       6     18     30
+    3            17     19     24      21     31     32
+    4            12     25     25      18     39     40
+    5            19     27     19      18     28     27
 
     >>> round(pg.epsilon(piv), 3)
     0.727
@@ -683,7 +711,7 @@ def epsilon(data, dv=None, within=None, subject=None, correction="gg"):
     data = _check_multilevel_rm(data, func="epsilon")
 
     # Covariance matrix
-    S = data.cov()
+    S = data.cov(numeric_only=True)
     n, k = data.shape
 
     # Epsilon is always 1 with only two repeated measures.
@@ -905,17 +933,16 @@ def sphericity(data, dv=None, within=None, subject=None, method="mauchly", alpha
     levels:
 
     >>> # Pivot from long-format to wide-format
-    >>> piv = data.pivot_table(index='Subject', columns=['Time', 'Metric'],
-    ...                        values='Performance')
+    >>> piv = data.pivot(index='Subject', columns=['Time', 'Metric'], values='Performance')
     >>> piv.head()
-    Time      Post                   Pre
-    Metric  Action Client Product Action Client Product
+    Time        Pre                  Post
+    Metric  Product Client Action Product Client Action
     Subject
-    1           34     30      18     17     12      13
-    2           30     18       6     18     19      12
-    3           32     31      21     24     19      17
-    4           40     39      18     25     25      12
-    5           27     28      18     19     27      19
+    1            13     12     17      18     30     34
+    2            12     19     18       6     18     30
+    3            17     19     24      21     31     32
+    4            12     25     25      18     39     40
+    5            19     27     19      18     28     27
 
     >>> spher, _, chisq, dof, pval = pg.sphericity(piv)
     >>> print(spher, round(chisq, 3), dof, round(pval, 3))
@@ -961,7 +988,7 @@ def sphericity(data, dv=None, within=None, subject=None, method="mauchly", alpha
         # Z = data.diff(axis=1).dropna(axis=1)
         # M = np.linalg.lstsq(data, Z, rcond=None)[0]
         # C, _ = np.linalg.qr(M)
-        # S = data.cov()
+        # S = data.cov(numeric_only=True)
         # A = C.T.dot(S).dot(C)
         # logW = np.log(np.linalg.det(A)) - d * np.log(np.trace(A / d))
         # W = np.exp(logW)
@@ -970,11 +997,11 @@ def sphericity(data, dv=None, within=None, subject=None, method="mauchly", alpha
         # 1 - Estimate the population covariance (= double-centered)
         # 2 - Calculate n-1 eigenvalues
         # 3 - Compute Mauchly's statistic
-        S = data.cov().to_numpy()  # NumPy, otherwise S.mean() != grandmean
+        S = data.cov(numeric_only=True).to_numpy()  # NumPy, otherwise S.mean() != grandmean
         S_pop = S - S.mean(0)[:, None] - S.mean(1)[None, :] + S.mean()
         eig = np.linalg.eigvalsh(S_pop)[1:]
         eig = eig[eig > 0.001]  # Additional check to remove very low eig
-        W = np.product(eig) / (eig.sum() / d) ** d
+        W = np.prod(eig) / (eig.sum() / d) ** d
         logW = np.log(W)
 
         # Compute chi-square and p-value (adapted from the ezANOVA R package)

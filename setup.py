@@ -17,20 +17,19 @@ MAINTAINER = "Raphael Vallat"
 MAINTAINER_EMAIL = "raphaelvallat9@gmail.com"
 URL = "https://pingouin-stats.org/index.html"
 DOWNLOAD_URL = "https://github.com/raphaelvallat/pingouin/"
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 LICENSE = "GPL-3.0"
 PACKAGE_DATA = {"pingouin.data.icons": ["*.svg"]}
 
 INSTALL_REQUIRES = [
-    "numpy>=1.19",
-    "scipy>=1.7",
-    "pandas>=1.0",
-    "matplotlib>=3.0.2",
-    "seaborn>=0.11",
-    "statsmodels>=0.13",
-    "scikit-learn<1.1.0",
-    "pandas_flavor>=0.2.0",
-    "outdated",
+    "numpy",
+    "scipy",
+    "pandas>=1.5",
+    "matplotlib",
+    "seaborn",
+    "statsmodels",
+    "scikit-learn",
+    "pandas_flavor",
     "tabulate",
 ]
 
@@ -41,9 +40,10 @@ PACKAGES = [
 
 CLASSIFIERS = [
     "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Operating System :: POSIX",
     "Operating System :: Unix",
@@ -58,7 +58,6 @@ except ImportError:
     from distutils.core import setup
 
 if __name__ == "__main__":
-
     setup(
         name=DISTNAME,
         author=MAINTAINER,

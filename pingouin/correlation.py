@@ -412,7 +412,7 @@ def corr(x, y, alternative="two-sided", method="pearson", **kwargs):
         * ``'n'``: Sample size (after removal of missing values)
         * ``'outliers'``: number of outliers, only if a robust method was used
         * ``'r'``: Correlation coefficient
-        * ``'CI95'``: 95% parametric confidence intervals around :math:`r`
+        * ``'CI95%'``: 95% parametric confidence intervals around :math:`r`
         * ``'p-val'``: p-value
         * ``'BF10'``: Bayes Factor of the alternative hypothesis (only for Pearson correlation)
         * ``'power'``: achieved power of the test with an alpha of 0.05.
@@ -637,6 +637,10 @@ def corr(x, y, alternative="two-sided", method="pearson", **kwargs):
     n_outliers = sum(outliers) if "outliers" in locals() else 0
     n_clean = n - n_outliers
 
+    # Rounding errors caused an r value marginally beyond 1
+    if abs(r) > 1 and np.isclose(abs(r), 1):
+        r = np.clip(r, -1, 1)
+
     # Compute the parametric 95% confidence interval and power
     if abs(r) == 1:
         ci = [r, r]
@@ -832,12 +836,13 @@ def partial_corr(
         raise ValueError("Cannot specify both covar and {x,y}_covar.")
     if x_covar is not None and y_covar is not None:
         raise ValueError("Cannot specify both x_covar and y_covar.")
-    assert x != covar, "x and covar must be independent"
-    assert y != covar, "y and covar must be independent"
     assert x != y, "x and y must be independent"
     if isinstance(covar, list):
         assert x not in covar, "x and covar must be independent"
         assert y not in covar, "y and covar must be independent"
+    else:
+        assert x != covar, "x and covar must be independent"
+        assert y != covar, "y and covar must be independent"
     # Check that columns exist
     col = _flatten_list([x, y, covar, x_covar, y_covar])
     assert all([c in data for c in col]), "columns are not in dataframe."
@@ -853,9 +858,9 @@ def partial_corr(
     # Calculate the partial corrrelation matrix - similar to pingouin.pcorr()
     if method == "spearman":
         # Convert the data to rank, similar to R cov()
-        V = data.rank(na_option="keep").cov()
+        V = data.rank(na_option="keep").cov(numeric_only=True)
     else:
-        V = data.cov()
+        V = data.cov(numeric_only=True)
     Vi = np.linalg.pinv(V, hermitian=True)  # Inverse covariance matrix
     Vi_diag = Vi.diagonal()
     D = np.diag(np.sqrt(1 / Vi_diag))
@@ -909,7 +914,7 @@ def pcorr(self):
     """Partial correlation matrix (:py:class:`pandas.DataFrame` method).
 
     Returns
-    ----------
+    -------
     pcormat : :py:class:`pandas.DataFrame`
         Partial correlation matrix.
 
@@ -949,7 +954,7 @@ def pcorr(self):
     Y  0.036649  1.000000  0.540140
     M  0.412804  0.540140  1.000000
     """
-    V = self.cov()  # Covariance matrix
+    V = self.cov(numeric_only=True)  # Covariance matrix
     Vi = np.linalg.pinv(V, hermitian=True)  # Inverse covariance matrix
     D = np.diag(np.sqrt(1 / np.diag(Vi)))
     pcor = -1 * (D @ Vi @ D)  # Partial correlation matrix
@@ -1079,15 +1084,15 @@ def rcorr(
     assert isinstance(decimals, int), "decimals must be an int."
     assert method in ["pearson", "spearman"], "Method is not recognized."
     assert upper in ["pval", "n"], "upper must be either `pval` or `n`."
-    mat = self.corr(method=method).round(decimals)
+    mat = self.corr(method=method, numeric_only=True).round(decimals)
     if upper == "n":
-        mat_upper = self.corr(method=lambda x, y: len(x)).astype(int)
+        mat_upper = self.corr(method=lambda x, y: len(x), numeric_only=True).astype(int)
     else:
         if method == "pearson":
-            mat_upper = self.corr(method=lambda x, y: pearsonr(x, y)[1])
+            mat_upper = self.corr(method=lambda x, y: pearsonr(x, y)[1], numeric_only=True)
         else:
             # Method = 'spearman'
-            mat_upper = self.corr(method=lambda x, y: spearmanr(x, y)[1])
+            mat_upper = self.corr(method=lambda x, y: spearmanr(x, y)[1], numeric_only=True)
 
         if padjust is not None:
             pvals = mat_upper.to_numpy()[tif(mat, k=1)]

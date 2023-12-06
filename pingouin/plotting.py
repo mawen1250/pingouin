@@ -26,16 +26,7 @@ __all__ = [
 
 
 def plot_blandaltman(
-    x,
-    y,
-    agreement=1.96,
-    xaxis="mean",
-    confidence=0.95,
-    annotate=True,
-    scatter_kws=dict(color="tab:blue", alpha=0.8),
-    figsize=(4.5, 4.5),
-    dpi=100,
-    ax=None,
+    x, y, agreement=1.96, xaxis="mean", confidence=0.95, annotate=True, ax=None, **kwargs
 ):
     """
     Generate a Bland-Altman plot to compare two sets of measurements.
@@ -61,15 +52,10 @@ def plot_blandaltman(
     annotate : bool
         If True (default), annotate the values for the mean difference
         and agreement limits.
-    scatter_kws : dict
-        Additional keyword arguments passed to
-        :py:func:`matplotlib.pyplot.scatter`.
-    figsize : tuple
-        Figsize in inches
-    dpi : int
-        Resolution of the figure in dots per inches.
     ax : matplotlib axes
         Axis on which to draw the plot.
+    **kwargs : optional
+        Optional argument(s) passed to :py:func:`matplotlib.pyplot.scatter`.
 
     Returns
     -------
@@ -137,6 +123,10 @@ def plot_blandaltman(
     assert not np.isnan(x).any(), "Missing values in x or y are not supported."
     assert not np.isnan(y).any(), "Missing values in x or y are not supported."
 
+    # Update default kwargs with specified inputs
+    _scatter_kwargs = {"color": "tab:blue", "alpha": 0.8}
+    _scatter_kwargs.update(kwargs)
+
     # Calculate mean, STD and SEM of x - y
     n = x.size
     dof = n - 1
@@ -162,10 +152,10 @@ def plot_blandaltman(
 
     # Start the plot
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
+        ax = plt.gca()
 
     # Plot the mean diff, limits of agreement and scatter
-    ax.scatter(xval, diff, **scatter_kws)
+    ax.scatter(xval, diff, **_scatter_kwargs)
     ax.axhline(mean_diff, color="k", linestyle="-", lw=2)
     ax.axhline(high, color="k", linestyle=":", lw=1.5)
     ax.axhline(low, color="k", linestyle=":", lw=1.5)
@@ -193,10 +183,10 @@ def plot_blandaltman(
         ci["high"] = stats.t.interval(confidence, dof, loc=high, scale=high_low_se)
         ci["low"] = stats.t.interval(confidence, dof, loc=low, scale=high_low_se)
         ax.axhspan(ci["mean"][0], ci["mean"][1], facecolor="tab:grey", alpha=0.2)
-        ax.axhspan(ci["high"][0], ci["high"][1], facecolor="tab:blue", alpha=0.2)
-        ax.axhspan(ci["low"][0], ci["low"][1], facecolor="tab:blue", alpha=0.2)
+        ax.axhspan(ci["high"][0], ci["high"][1], facecolor=_scatter_kwargs["color"], alpha=0.2)
+        ax.axhspan(ci["low"][0], ci["low"][1], facecolor=_scatter_kwargs["color"], alpha=0.2)
 
-    # Labels and title
+    # Labels
     ax.set_ylabel(f"{xname} - {yname}")
     ax.set_xlabel(xlabel)
     sns.despine(ax=ax)
@@ -226,7 +216,7 @@ def _ppoints(n, a=0.5):
     return (np.arange(n) + 1 - a) / (n + 1 - 2 * a)
 
 
-def qqplot(x, dist="norm", sparams=(), confidence=0.95, figsize=(5, 4), ax=None):
+def qqplot(x, dist="norm", sparams=(), confidence=0.95, square=True, ax=None, **kwargs):
     """Quantile-Quantile plot.
 
     Parameters
@@ -242,10 +232,12 @@ def qqplot(x, dist="norm", sparams=(), confidence=0.95, figsize=(5, 4), ax=None)
     confidence : float
         Confidence level (.95 = 95%) for point-wise confidence envelope.
         Can be disabled by passing False.
-    figsize : tuple
-        Figsize in inches
+    square: bool
+        If True (default), ensure equal aspect ratio between X and Y axes.
     ax : matplotlib axes
         Axis on which to draw the plot
+    **kwargs : optional
+        Optional argument(s) passed to :py:func:`matplotlib.pyplot.scatter`.
 
     Returns
     -------
@@ -336,6 +328,10 @@ def qqplot(x, dist="norm", sparams=(), confidence=0.95, figsize=(5, 4), ax=None)
         >>> sns.set_style('darkgrid')
         >>> ax = pg.qqplot(x, dist='norm', sparams=(mean, std))
     """
+    # Update default kwargs with specified inputs
+    _scatter_kwargs = {"marker": "o", "color": "blue"}
+    _scatter_kwargs.update(kwargs)
+
     if isinstance(dist, str):
         dist = getattr(stats, dist)
 
@@ -370,13 +366,12 @@ def qqplot(x, dist="norm", sparams=(), confidence=0.95, figsize=(5, 4), ax=None)
 
     # Start the plot
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax = plt.gca()
 
-    ax.plot(theor, observed, "bo")
+    ax.scatter(theor, observed, **_scatter_kwargs)
 
     ax.set_xlabel("Theoretical quantiles")
     ax.set_ylabel("Ordered quantiles")
-    ax.set_title("Q-Q Plot")
 
     # Add diagonal line
     end_pts = [ax.get_xlim(), ax.get_ylim()]
@@ -405,6 +400,10 @@ def qqplot(x, dist="norm", sparams=(), confidence=0.95, figsize=(5, 4), ax=None)
         ax.plot(theor, upper, "r--", lw=1.25)
         ax.plot(theor, lower, "r--", lw=1.25)
 
+    # Make square
+    if square:
+        ax.set_aspect("equal")
+
     return ax
 
 
@@ -417,8 +416,6 @@ def plot_paired(
     boxplot=True,
     boxplot_in_front=False,
     orient="v",
-    figsize=(4, 4),
-    dpi=100,
     ax=None,
     colors=["green", "grey", "indianred"],
     pointplot_kwargs={"scale": 0.6, "marker": "."},
@@ -455,10 +452,6 @@ def plot_paired(
         by 90 degrees.
 
         .. versionadded:: 0.3.9
-    figsize : tuple
-        Figsize in inches
-    dpi : int
-        Resolution of the figure in dots per inches.
     ax : matplotlib axes
         Axis on which to draw the plot.
     colors : list of str
@@ -491,8 +484,7 @@ def plot_paired(
         >>> import pingouin as pg
         >>> df = pg.read_dataset('mixed_anova').query("Time != 'January'")
         >>> df = df.query("Group == 'Meditation' and Subject > 40")
-        >>> ax = pg.plot_paired(data=df, dv='Scores', within='Time',
-        ...                     subject='Subject', dpi=150)
+        >>> ax = pg.plot_paired(data=df, dv='Scores', within='Time', subject='Subject')
 
     Paired plot on an existing axis (no boxplot and uniform color):
 
@@ -583,7 +575,7 @@ def plot_paired(
 
     # Start the plot
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
+        ax = plt.gca()
 
     # Set x and y depending on orientation using the num. replacement within
     _x = "wthn" if orient == "v" else dv
@@ -736,17 +728,21 @@ def plot_shift(
         >>> y = np.random.normal(6, 1.5, 50)
         >>> fig = pg.plot_shift(x, y)
 
-    With different options
+    With different options, and custom axes labels
 
     .. plot::
 
-        >>> import numpy as np
         >>> import pingouin as pg
-        >>> np.random.seed(42)
-        >>> x = np.random.normal(5.5, 2, 30)
-        >>> y = np.random.normal(6, 1.5, 30)
-        >>> fig = pg.plot_shift(x, y, paired=True, n_boot=2000, percentiles=[25, 50, 75],
-        ...                     show_median=False, seed=456, violin=False)
+        >>> import matplotlib.pyplot as plt
+        >>> data = pg.read_dataset("pairwise_corr")
+        >>> fig = pg.plot_shift(data["Neuroticism"], data["Conscientiousness"], paired=True,
+        ...                     n_boot=2000, percentiles=[25, 50, 75], show_median=False, seed=456,
+        ...                     violin=False)
+        >>> fig.axes[0].set_xlabel("Groups")
+        >>> fig.axes[0].set_ylabel("Values", size=15)
+        >>> fig.axes[0].set_title("Comparing Neuroticism and Conscientiousness", size=15)
+        >>> fig.axes[1].set_xlabel("Neuroticism quantiles", size=12)
+        >>> plt.tight_layout()
     """
     from pingouin.regression import _bias_corrected_ci
     from pingouin.nonparametric import harrelldavis as hd
@@ -898,7 +894,14 @@ def plot_shift(
 
 
 def plot_rm_corr(
-    data=None, x=None, y=None, subject=None, legend=False, kwargs_facetgrid=dict(height=4, aspect=1)
+    data=None,
+    x=None,
+    y=None,
+    subject=None,
+    legend=False,
+    kwargs_facetgrid=dict(height=4, aspect=1),
+    kwargs_line=dict(ls="solid"),
+    kwargs_scatter=dict(marker="o"),
 ):
     """Plot a repeated measures correlation.
 
@@ -914,7 +917,11 @@ def plot_rm_corr(
         If True, add legend to plot. Legend will show all the unique values in
         ``subject``.
     kwargs_facetgrid : dict
-        Optional keyword argument passed to :py:class:`seaborn.FacetGrid`
+        Optional keyword arguments passed to :py:class:`seaborn.FacetGrid`
+    kwargs_line : dict
+        Optional keyword arguments passed to :py:class:`matplotlib.pyplot.plot`
+    kwargs_scatter : dict
+        Optional keyword arguments passed to :py:class:`matplotlib.pyplot.scatter`
 
     Returns
     -------
@@ -994,7 +1001,10 @@ def plot_rm_corr(
     # C marks the data as categorical
     # Q allows to quote variable that do not meet Python variable name rule
     # e.g. if variable is "weight.in.kg" or "2A"
-    formula = "Q('%s') ~ C(Q('%s')) + Q('%s')" % (y, subject, x)
+    assert x not in ["C", "Q"], "`x` must not be 'C' or 'Q'."
+    assert y not in ["C", "Q"], "`y` must not be 'C' or 'Q'."
+    assert subject not in ["C", "Q"], "`subject` must not be 'C' or 'Q'."
+    formula = f"Q('{y}') ~ C(Q('{subject}')) + Q('{x}')"
     model = ols(formula, data=data).fit()
 
     # Fitted values
@@ -1006,8 +1016,8 @@ def plot_rm_corr(
 
     # Start plot
     g = sns.FacetGrid(data, hue=subject, **kwargs_facetgrid)
-    g = g.map(sns.regplot, x, "pred", scatter=False, ci=None, truncate=True)
-    g = g.map(sns.scatterplot, x, y)
+    g = g.map(sns.regplot, x, "pred", scatter=False, ci=None, truncate=True, line_kws=kwargs_line)
+    g = g.map(sns.scatterplot, x, y, **kwargs_scatter)
 
     if legend:
         g.add_legend()
@@ -1017,8 +1027,7 @@ def plot_rm_corr(
 
 def plot_circmean(
     angles,
-    figsize=(4, 4),
-    dpi=None,
+    square=True,
     ax=None,
     kwargs_markers=dict(color="tab:blue", marker="o", mfc="none", ms=10),
     kwargs_arrow=dict(width=0.01, head_width=0.1, head_length=0.1, fc="tab:red", ec="tab:red"),
@@ -1032,10 +1041,8 @@ def plot_circmean(
     ----------
     angles : array or list
         Angles (expressed in radians). Only 1D array are supported here.
-    figsize : tuple
-        Figsize in inches. Default is (4, 4).
-    dpi : int
-        Resolution of the figure in dots per inches.
+    square: bool
+        If True (default), ensure equal aspect ratio between X and Y axes.
     ax : matplotlib axes
         Axis on which to draw the plot.
     kwargs_markers : dict
@@ -1066,9 +1073,11 @@ def plot_circmean(
     .. plot::
 
         >>> import pingouin as pg
+        >>> import matplotlib.pyplot as plt
+        >>> _, ax = plt.subplots(1, 1, figsize=(3, 3))
         >>> ax = pg.plot_circmean([0.05, -0.8, 1.2, 0.8, 0.5, -0.3, 0.3, 0.7],
         ...                       kwargs_markers=dict(color='k', mfc='k'),
-        ...                       kwargs_arrow=dict(ec='k', fc='k'))
+        ...                       kwargs_arrow=dict(ec='k', fc='k'), ax=ax)
 
     .. plot::
 
@@ -1117,7 +1126,8 @@ def plot_circmean(
     zm = r * np.exp(1j * phi)
 
     # Plot unit circle
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    if ax is None:
+        ax = plt.gca()
     circle = Circle((0, 0), 1, edgecolor="k", facecolor="none", linewidth=2)
     ax.add_patch(circle)
     ax.axvline(0, lw=1, ls=":", color="slategrey")
@@ -1138,4 +1148,8 @@ def plot_circmean(
     ax.text(-1.3, 0, r"$\pi$", verticalalignment="center")
     ax.text(0, 1.2, r"$+\pi/2$", horizontalalignment="center")
     ax.text(0, -1.3, r"$-\pi/2$", horizontalalignment="center")
+
+    # Make square
+    if square:
+        ax.set_aspect("equal")
     return ax

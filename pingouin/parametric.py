@@ -1,6 +1,7 @@
 # Author: Raphael Vallat <raphaelvallat9@gmail.com>
 import warnings
 import time
+from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 from scipy.stats import f
@@ -271,6 +272,10 @@ def ttest(x, y, paired=False, alternative="two-sided", correction="auto", r=0.70
     if ny == 1:
         # Case one sample T-test
         tval, pval = ttest_1samp(x, y, alternative=alternative)
+
+        # Some versions of scipy return an array for the t-value
+        if isinstance(tval, Iterable):
+            tval = tval[0]
         dof = nx - 1
         se = np.sqrt(x.var(ddof=1) / nx)
     if ny > 1 and paired is True:
@@ -577,20 +582,20 @@ def rm_anova(
     # Groupby
     # I think that observed=True is actually not needed here since we have already used
     # `observed=True` in pivot_table.
-    grp_with = data.groupby(within, observed=True)[dv]
+    grp_with = data.groupby(within, observed=True, group_keys=False)[dv]
     rm = list(data[within].unique())
     n_rm = len(rm)
     n_obs = int(grp_with.count().max())
     grandmean = data[dv].mean()
 
     # Calculate sums of squares
-    ss_with = ((grp_with.mean() - grandmean) ** 2 * grp_with.count()).sum()
+    ss_with = ((grp_with.mean(numeric_only=True) - grandmean) ** 2 * grp_with.count()).sum()
     ss_resall = grp_with.apply(lambda x: (x - x.mean()) ** 2).sum()
     # sstotal = sstime + ss_resall =  sstime + (sssubj + sserror)
     # ss_total = ((data[dv] - grandmean)**2).sum()
     # We can further divide the residuals into a within and between component:
     grp_subj = data.groupby(subject, observed=True)[dv]
-    ss_resbetw = n_rm * np.sum((grp_subj.mean() - grandmean) ** 2)
+    ss_resbetw = n_rm * np.sum((grp_subj.mean(numeric_only=True) - grandmean) ** 2)
     ss_reswith = ss_resall - ss_resbetw
 
     # Calculate degrees of freedom
@@ -626,7 +631,7 @@ def rm_anova(
 
     # If required, apply Greenhouse-Geisser correction for sphericity
     if correction:
-        corr_ddof1, corr_ddof2 = [np.maximum(d * eps, 1.0) for d in (ddof1, ddof2)]
+        corr_ddof1, corr_ddof2 = (np.maximum(d * eps, 1.0) for d in (ddof1, ddof2))
         p_corr = f(corr_ddof1, corr_ddof2).sf(fval)
 
     # Create output dataframe
@@ -734,12 +739,12 @@ def rm_anova2(data=None, dv=None, within=None, subject=None, effsize="ng2"):
     # Groupby means
     # I think that observed=True is actually not needed here since we have already used
     # `observed=True` in pivot_table.
-    grp_s = data.groupby(subject, observed=True)[dv].mean()
-    grp_a = data.groupby([a], observed=True)[dv].mean()
-    grp_b = data.groupby([b], observed=True)[dv].mean()
-    grp_ab = data.groupby([a, b], observed=True)[dv].mean()
-    grp_as = data.groupby([a, subject], observed=True)[dv].mean()
-    grp_bs = data.groupby([b, subject], observed=True)[dv].mean()
+    grp_s = data.groupby(subject, observed=True)[dv].mean(numeric_only=True)
+    grp_a = data.groupby([a], observed=True)[dv].mean(numeric_only=True)
+    grp_b = data.groupby([b], observed=True)[dv].mean(numeric_only=True)
+    grp_ab = data.groupby([a, b], observed=True)[dv].mean(numeric_only=True)
+    grp_as = data.groupby([a, subject], observed=True)[dv].mean(numeric_only=True)
+    grp_bs = data.groupby([b, subject], observed=True)[dv].mean(numeric_only=True)
 
     # Sums of squares
     ss_tot = np.sum((data[dv] - mu) ** 2)
@@ -813,9 +818,9 @@ def rm_anova2(data=None, dv=None, within=None, subject=None, effsize="ng2"):
     eps_ab = epsilon(data_piv, correction="gg")
 
     # Greenhouse-Geisser correction
-    df_a_c, df_as_c = [np.maximum(d * eps_a, 1.0) for d in (df_a, df_as)]
-    df_b_c, df_bs_c = [np.maximum(d * eps_b, 1.0) for d in (df_b, df_bs)]
-    df_ab_c, df_abs_c = [np.maximum(d * eps_ab, 1.0) for d in (df_ab, df_abs)]
+    df_a_c, df_as_c = (np.maximum(d * eps_a, 1.0) for d in (df_a, df_as))
+    df_b_c, df_bs_c = (np.maximum(d * eps_b, 1.0) for d in (df_b, df_bs))
+    df_ab_c, df_abs_c = (np.maximum(d * eps_ab, 1.0) for d in (df_ab, df_abs))
     p_a_corr = f(df_a_c, df_as_c).sf(f_a)
     p_b_corr = f(df_b_c, df_bs_c).sf(f_b)
     p_ab_corr = f(df_ab_c, df_abs_c).sf(f_ab)
@@ -1031,12 +1036,12 @@ def anova(data=None, dv=None, between=None, ss_type=2, detailed=False, effsize="
     sserror = grp.apply(lambda x: np.square(x - x.mean()), values).sum()
 
     # Calculate sums of squares (Pandas)
-    grp = data.groupby(between, observed=True)[dv]
+    grp = data.groupby(between, observed=True, group_keys=False)[dv]
     # Between effect
-    ssbetween = ((grp.mean() - data[dv].mean()) ** 2 * grp.count()).sum()
+    ssbetween = ((grp.mean(numeric_only=True) - data[dv].mean()) ** 2 * grp.count()).sum()
     # Within effect (= error between)
     #  = (grp.var(ddof=0) * grp.count()).sum()
-    # sserror = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
+    # sserror = grp.transform(lambda x: (x - x.mean()) ** 2).sum()
     # In 1-way ANOVA, sstotal = ssbetween + sserror
     # sstotal = ssbetween + sserror
 
@@ -1104,7 +1109,7 @@ def anova2(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
 
     # Reset index (avoid duplicate axis error)
     data = data.reset_index(drop=True)
-    grp_both = data.groupby(between, observed=True)[dv]
+    grp_both = data.groupby(between, observed=True, group_keys=False)[dv]
 
     if grp_both.count().nunique() == 1:
         # BALANCED DESIGN
@@ -1207,6 +1212,8 @@ def anovan(data=None, dv=None, between=None, ss_type=2, effsize="np2"):
     # C marks the data as categorical
     # Q allows to quote variable that do not meet Python variable name rule
     # e.g. if variable is "weight.in.kg" or "2A"
+    assert dv not in ["C", "Q"], "`dv` must not be 'C' or 'Q'."
+    assert all(fac not in ["C", "Q"] for fac in between), "`between` must not contain 'C' or 'Q'."
     formula = "Q('%s') ~ " % dv
     for fac in between:
         formula += "C(Q('%s'), Sum) * " % fac
@@ -1275,9 +1282,8 @@ def welch_anova(data=None, dv=None, between=None):
         ANOVA summary:
 
         * ``'Source'``: Factor names
-        * ``'SS'``: Sums of squares
-        * ``'DF'``: Degrees of freedom
-        * ``'MS'``: Mean squares
+        * ``'ddof1'``: Numerator degrees of freedom
+        * ``'ddof2'``: Denominator degrees of freedom
         * ``'F'``: F-values
         * ``'p-unc'``: uncorrected p-values
         * ``'np2'``: Partial eta-squared
@@ -1381,22 +1387,23 @@ def welch_anova(data=None, dv=None, between=None):
     ddof1 = r - 1
 
     # Compute weights and ajusted means
-    grp = data.groupby(between, observed=True)[dv]
+    grp = data.groupby(between, observed=True, group_keys=False)[dv]
     weights = grp.count() / grp.var()
     adj_grandmean = (weights * grp.mean()).sum() / weights.sum()
 
     # Sums of squares (regular and adjusted)
     ss_res = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
-    ss_bet = ((grp.mean() - data[dv].mean()) ** 2 * grp.count()).sum()
-    ss_betadj = np.sum(weights * np.square(grp.mean() - adj_grandmean))
+    ss_bet = ((grp.mean(numeric_only=True) - data[dv].mean()) ** 2 * grp.count()).sum()
+    ss_betadj = np.sum(weights * np.square(grp.mean(numeric_only=True) - adj_grandmean))
     ms_betadj = ss_betadj / ddof1
 
     # Calculate lambda, F-value, p-value and np2
     lamb = (3 * np.sum((1 / (grp.count() - 1)) * (1 - (weights / weights.sum())) ** 2)) / (
         r**2 - 1
     )
+    ddof2 = 1 / lamb
     fval = ms_betadj / (1 + (2 * lamb * (r - 2)) / 3)
-    pval = f.sf(fval, ddof1, 1 / lamb)
+    pval = f.sf(fval, ddof1, ddof2)
     np2 = ss_bet / (ss_bet + ss_res)
 
     # Create output dataframe
@@ -1404,7 +1411,7 @@ def welch_anova(data=None, dv=None, between=None):
         {
             "Source": between,
             "ddof1": ddof1,
-            "ddof2": 1 / lamb,
+            "ddof2": ddof2,
             "F": fval,
             "p-unc": pval,
             "np2": np2,
@@ -1555,7 +1562,7 @@ def mixed_anova(
     ss_betw = aov_betw.at[0, "SS"]
     ss_with = aov_with.at[0, "SS"]
     # Extract residuals and interactions
-    grp = data.groupby([between, within], observed=True)[dv]
+    grp = data.groupby([between, within], observed=True, group_keys=False)[dv]
     # ssresall = residuals within + residuals between
     ss_resall = grp.apply(lambda x: (x - x.mean()) ** 2).sum()
     # Interaction
@@ -1752,7 +1759,10 @@ def ancova(data=None, dv=None, between=None, covar=None, effsize="np2"):
 
     # Fit ANCOVA model
     # formula = dv ~ 1 + between + covar1 + covar2 + ...
-    formula = "Q('%s') ~ C(Q('%s'))" % (dv, between)
+    assert dv not in ["C", "Q"], "`dv` must not be 'C' or 'Q'."
+    assert between not in ["C", "Q"], "`between` must not be 'C' or 'Q'."
+    assert all(c not in ["C", "Q"] for c in covar), "`covar` must not contain 'C' or 'Q'."
+    formula = f"Q('{dv}') ~ C(Q('{between}'))"
     for c in covar:
         formula += " + Q('%s')" % (c)
     model = ols(formula, data=data).fit()

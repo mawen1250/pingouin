@@ -484,6 +484,49 @@ class TestPairwise(TestCase):
         y = df[df["Gender"] == "F"]["Scores"].to_numpy()
         assert round(abs(mwu(x, y).at["MWU", "RBC"]), 3) == 0.252
 
+    def test_ptests(self):
+        """Test function ptests."""
+        from itertools import combinations
+        from scipy.stats import ttest_ind, ttest_rel
+
+        # Load BFI dataset
+        df = read_dataset("pairwise_corr").iloc[:30, 1:]
+        df.columns = ["N", "E", "O", "A", "C"]
+        # Add some missing values
+        df.iloc[[2, 5, 20], 2] = np.nan
+        df.iloc[[1, 4, 10], 3] = np.nan
+
+        combs = list(combinations(df.columns, 2))
+
+        # Independent T-test
+        pt = df.ptests(decimals=7, stars=False)
+        for a, b in combs:
+            t, p = ttest_ind(df[a], df[b], nan_policy="omit")
+            assert round(t, 7) == float(pt.at[b, a])
+            assert round(p, 7) == float(pt.at[a, b])
+
+        # Using custom parameter
+        pt_welch = df.ptests(decimals=5, stars=False, equal_var=False)
+        assert not pt.equals(pt_welch)
+
+        # Using stars
+        pt_stars = df.ptests(decimals=7)
+        assert not pt.equals(pt_stars)
+
+        # Paired T-test
+        pt = df.ptests(decimals=7, paired=True, stars=False)
+        for a, b in combs:
+            t, p = ttest_rel(df[a], df[b], nan_policy="omit")
+            assert round(t, 7) == float(pt.at[b, a])
+            assert round(p, 7) == float(pt.at[a, b])
+
+        # With Bonferroni correction
+        pt = df.ptests(decimals=7, paired=True, stars=False, padjust="bonf")
+        for a, b in combs:
+            _, p = ttest_rel(df[a], df[b], nan_policy="omit")
+            p = min(p * len(combs), 1)
+            assert round(p, 7) == float(pt.at[a, b])
+
     def test_pairwise_tukey(self):
         """Test function pairwise_tukey.
 
@@ -517,6 +560,9 @@ class TestPairwise(TestCase):
         # P-values Pingouin: [0.8694, 0.0010, 0.0010]
         sig = stats["p-tukey"].apply(lambda x: "Yes" if x < 0.05 else "No").to_numpy()
         assert np.array_equal(sig, ["No", "Yes", "Yes"])
+        # Effect size should be the same as pairwise_tests
+        stats_tests = df.pairwise_tests(dv="body_mass_g", between="species").round(4)
+        assert np.array_equal(stats["hedges"], stats_tests["hedges"])
 
         # Same but with balanced group
         df_balanced = df.groupby("species").head(20).copy()
@@ -570,6 +616,9 @@ class TestPairwise(TestCase):
         # P-values Pingouin: [0.8339, 0.0010, 0.0010]
         sig = stats["pval"].apply(lambda x: "Yes" if x < 0.05 else "No").to_numpy()
         assert np.array_equal(sig, ["No", "Yes", "Yes"])
+        # Effect size should be the same as pairwise_tests
+        stats_tests = df.pairwise_tests(dv="body_mass_g", between="species").round(4)
+        assert np.array_equal(stats["hedges"], stats_tests["hedges"])
 
         # Same but with balanced group
         df_balanced = df.groupby("species").head(20).copy()

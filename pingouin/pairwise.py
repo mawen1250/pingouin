@@ -7,7 +7,7 @@ from itertools import combinations, product
 from pingouin.config import options
 from pingouin.parametric import anova
 from pingouin.multicomp import multicomp
-from pingouin.effsize import compute_effsize, convert_effsize
+from pingouin.effsize import compute_effsize
 from pingouin.utils import _check_dataframe, _flatten_list, _postprocess_dataframe
 from scipy.stats import studentized_range
 import warnings
@@ -15,6 +15,7 @@ import warnings
 __all__ = [
     "pairwise_ttests",
     "pairwise_tests",
+    "ptests",
     "pairwise_tukey",
     "pairwise_gameshowell",
     "pairwise_corr",
@@ -474,7 +475,9 @@ def pairwise_tests(
             # designs. Indeed, a similar groupby is applied by default on
             # each within-subject factor of a two-way repeated measures design.
             if all([agg[i], marginal]):
-                tmp = data.groupby([subject, f], as_index=False, observed=True, sort=True).mean()
+                tmp = data.groupby([subject, f], as_index=False, observed=True, sort=True).mean(
+                    numeric_only=True
+                )
             else:
                 tmp = data
             pt = pairwise_tests(
@@ -594,14 +597,185 @@ def pairwise_tests(
 
 
 @pf.register_dataframe_method
+def ptests(
+    self,
+    paired=False,
+    decimals=3,
+    padjust=None,
+    stars=True,
+    pval_stars={0.001: "***", 0.01: "**", 0.05: "*"},
+    **kwargs,
+):
+    """
+    Pairwise T-test between columns of a dataframe.
+
+    T-values are reported on the lower triangle of the output pairwise matrix and p-values on the
+    upper triangle. This method is a faster, but less exhaustive, matrix-version of the
+    :py:func:`pingouin.pairwise_test` function. Missing values are automatically removed from each
+    pairwise T-test.
+
+    .. versionadded:: 0.5.3
+
+    Parameters
+    ----------
+    self : :py:class:`pandas.DataFrame`
+        Input dataframe.
+    paired : boolean
+        Specify whether the two observations are related (i.e. repeated measures) or independent.
+    decimals : int
+        Number of decimals to display in the output matrix.
+    padjust : string or None
+        P-values adjustment for multiple comparison
+
+        * ``'none'``: no correction
+        * ``'bonf'``: one-step Bonferroni correction
+        * ``'sidak'``: one-step Sidak correction
+        * ``'holm'``: step-down method using Bonferroni adjustments
+        * ``'fdr_bh'``: Benjamini/Hochberg FDR correction
+        * ``'fdr_by'``: Benjamini/Yekutieli FDR correction
+    stars : boolean
+        If True, only significant p-values are displayed as stars using the pre-defined thresholds
+        of ``pval_stars``. If False, all the raw p-values are displayed.
+    pval_stars : dict
+        Significance thresholds. Default is 3 stars for p-values <0.001, 2 stars for
+        p-values <0.01 and 1 star for p-values <0.05.
+    **kwargs : optional
+        Optional argument(s) passed to the lower-level scipy functions, i.e.
+        :py:func:`scipy.stats.ttest_ind` for independent T-test and
+        :py:func:`scipy.stats.ttest_rel` for paired T-test.
+
+    Returns
+    -------
+    mat : :py:class:`pandas.DataFrame`
+        Pairwise T-test matrix, of dtype str, with T-values on the lower triangle and p-values on
+        the upper triangle.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import pingouin as pg
+    >>> # Load an example dataset of personality dimensions
+    >>> df = pg.read_dataset('pairwise_corr').iloc[:30, 1:]
+    >>> df.columns = ["N", "E", "O", 'A', "C"]
+    >>> # Add some missing values
+    >>> df.iloc[[2, 5, 20], 2] = np.nan
+    >>> df.iloc[[1, 4, 10], 3] = np.nan
+    >>> df.head().round(2)
+          N     E     O     A     C
+    0  2.48  4.21  3.94  3.96  3.46
+    1  2.60  3.19  3.96   NaN  3.23
+    2  2.81  2.90   NaN  2.75  3.50
+    3  2.90  3.56  3.52  3.17  2.79
+    4  3.02  3.33  4.02   NaN  2.85
+
+    Independent pairwise T-tests
+
+    >>> df.ptests()
+            N       E      O      A    C
+    N       -     ***    ***    ***  ***
+    E  -8.397       -                ***
+    O  -8.332  -0.596      -         ***
+    A  -8.804    0.12   0.72      -  ***
+    C  -4.759   3.753  4.074  3.787    -
+
+    Let's compare with SciPy
+
+    >>> from scipy.stats import ttest_ind
+    >>> np.round(ttest_ind(df["N"], df["E"]), 3)
+    array([-8.397,  0.   ])
+
+    Passing custom parameters to the lower-level :py:func:`scipy.stats.ttest_ind` function
+
+    >>> df.ptests(alternative="greater", equal_var=True)
+            N       E      O      A    C
+    N       -
+    E  -8.397       -                ***
+    O  -8.332  -0.596      -         ***
+    A  -8.804    0.12   0.72      -  ***
+    C  -4.759   3.753  4.074  3.787    -
+
+    Paired T-test, showing the actual p-values instead of stars
+
+    >>> df.ptests(paired=True, stars=False, decimals=4)
+            N        E       O       A       C
+    N        -   0.0000  0.0000  0.0000  0.0002
+    E  -7.0773        -  0.8776  0.7522  0.0012
+    O  -8.0568  -0.1555       -  0.8137  0.0008
+    A  -8.3994   0.3191  0.2383       -  0.0009
+    C  -4.2511   3.5953  3.7849  3.7652       -
+
+    Adjusting for multiple comparisons using the Holm-Bonferroni method
+
+    >>> df.ptests(paired=True, stars=False, padjust="holm")
+            N       E      O      A      C
+    N       -   0.000  0.000  0.000  0.001
+    E  -7.077       -     1.     1.  0.005
+    O  -8.057  -0.155      -     1.  0.005
+    A  -8.399   0.319  0.238      -  0.005
+    C  -4.251   3.595  3.785  3.765      -
+    """
+    from itertools import combinations
+    from numpy import triu_indices_from as tif
+    from numpy import format_float_positional as ffp
+    from scipy.stats import ttest_ind, ttest_rel
+
+    assert isinstance(pval_stars, dict), "pval_stars must be a dictionary."
+    assert isinstance(decimals, int), "decimals must be an int."
+
+    if paired:
+        func = ttest_rel
+    else:
+        func = ttest_ind
+
+    # Get T-values and p-values
+    # We cannot use pandas.DataFrame.corr here because it will incorrectly remove rows missing
+    # values, even when using an independent T-test!
+    cols = self.columns
+    combs = list(combinations(cols, 2))
+    mat = pd.DataFrame(columns=cols, index=cols, dtype=np.float64)
+    mat_upper = mat.copy()
+
+    for a, b in combs:
+        t, p = func(self[a], self[b], **kwargs, nan_policy="omit")
+        mat.loc[b, a] = np.round(t, decimals)
+        # Do not round p-value here, or we'll lose precision for multicomp
+        mat_upper.loc[a, b] = p
+
+    if padjust is not None:
+        pvals = mat_upper.to_numpy()[tif(mat, k=1)]
+        mat_upper.to_numpy()[tif(mat, k=1)] = multicomp(pvals, alpha=0.05, method=padjust)[1]
+
+    # Convert T-values to str, and fill the diagonal with "-"
+    mat = mat.astype(str)
+    np.fill_diagonal(mat.to_numpy(), "-")
+
+    def replace_pval(x):
+        for key, value in pval_stars.items():
+            if x < key:
+                return value
+        return ""
+
+    if stars:
+        # Replace p-values by stars
+        mat_upper = mat_upper.applymap(replace_pval)
+    else:
+        mat_upper = mat_upper.applymap(lambda x: ffp(x, precision=decimals))
+
+    # Replace upper triangle by p-values
+    mat.to_numpy()[tif(mat, k=1)] = mat_upper.to_numpy()[tif(mat, k=1)]
+    return mat
+
+
+@pf.register_dataframe_method
 def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
     """Pairwise Tukey-HSD post-hoc test.
 
     Parameters
     ----------
     data : :py:class:`pandas.DataFrame`
-        DataFrame. Note that this function can also directly be used as a
-        Pandas method, in which case this argument is no longer needed.
+        DataFrame. Note that this function can also directly be used as a Pandas method, in which
+        case this argument is no longer needed.
     dv : string
         Name of column containing the dependent variable.
     between: string
@@ -641,11 +815,10 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
     -----
     Tukey HSD post-hoc [1]_ is best for balanced one-way ANOVA.
 
-    It has been proven to be conservative for one-way ANOVA with unequal
-    sample sizes. However, it is not robust if the groups have unequal
-    variances, in which case the Games-Howell test is more adequate.
-    Tukey HSD is not valid for repeated measures ANOVA.
-    Only one-way ANOVA design are supported.
+    It has been proven to be conservative for one-way ANOVA with unequal sample sizes. However, it
+    is not robust if the groups have unequal variances, in which case the Games-Howell test is
+    more adequate. Tukey HSD is not valid for repeated measures ANOVA. Only one-way ANOVA design
+    are supported.
 
     The T-values are defined as:
 
@@ -654,24 +827,23 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
         t = \\frac{\\overline{x}_i - \\overline{x}_j}
         {\\sqrt{2 \\cdot \\text{MS}_w / n}}
 
-    where :math:`\\overline{x}_i` and :math:`\\overline{x}_j` are the means of
-    the first and second group, respectively, :math:`\\text{MS}_w` the mean
-    squares of the error (computed using ANOVA) and :math:`n` the sample size.
+    where :math:`\\overline{x}_i` and :math:`\\overline{x}_j` are the means of the first and
+    second group, respectively, :math:`\\text{MS}_w` the mean squares of the error (computed using
+    ANOVA) and :math:`n` the sample size.
 
-    If the sample sizes are unequal, the Tukey-Kramer procedure is
-    automatically used:
+    If the sample sizes are unequal, the Tukey-Kramer procedure is automatically used:
 
     .. math::
 
         t = \\frac{\\overline{x}_i - \\overline{x}_j}{\\sqrt{\\frac{MS_w}{n_i}
         + \\frac{\\text{MS}_w}{n_j}}}
 
-    where :math:`n_i` and :math:`n_j` are the sample sizes of the first and
-    second group, respectively.
+    where :math:`n_i` and :math:`n_j` are the sample sizes of the first and second group,
+    respectively.
 
     The p-values are then approximated using the Studentized range distribution
-    :math:`Q(\\sqrt2|t_i|, r, N - r)` where :math:`r` is the total number of
-    groups and :math:`N` is the total sample size.
+    :math:`Q(\\sqrt2|t_i|, r, N - r)` where :math:`r` is the total number of groups and
+    :math:`N` is the total sample size.
 
     References
     ----------
@@ -690,9 +862,9 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
     >>> df = pg.read_dataset('penguins')
     >>> df.pairwise_tukey(dv='body_mass_g', between='species').round(3)
                A          B   mean(A)   mean(B)      diff      se       T  p-tukey  hedges
-    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  67.512  -0.480    0.881  -0.070
-    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  56.148 -24.495    0.000  -2.967
-    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  69.857 -19.224    0.000  -2.894
+    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  67.512  -0.480    0.881  -0.074
+    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  56.148 -24.495    0.000  -2.860
+    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  69.857 -19.224    0.000  -2.875
     """
     # First compute the ANOVA
     # For max precision, make sure rounding is disabled
@@ -710,7 +882,7 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
     # See https://github.com/raphaelvallat/pingouin/issues/111
     labels = np.array(list(grp.groups.keys()))
     n = grp.count().to_numpy()
-    gmeans = grp.mean().to_numpy()
+    gmeans = grp.mean(numeric_only=True).to_numpy()
     gvar = aov.at[1, "MS"] / n
 
     # Pairwise combinations
@@ -729,8 +901,20 @@ def pairwise_tukey(data=None, dv=None, between=None, effsize="hedges"):
     # punc = t.sf(np.abs(tval), n[g1].size + n[g2].size - 2) * 2
 
     # Effect size
-    d = tval * np.sqrt(1 / n[g1] + 1 / n[g2])
-    ef = convert_effsize(d, "cohen", effsize, n[g1], n[g2])
+    # Method 1: Approximation
+    # d = tval * np.sqrt(1 / n[g1] + 1 / n[g2])
+    # ef = convert_effsize(d, "cohen", effsize, n[g1], n[g2])
+    # Method 2: Exact
+    ef = []
+    for idx_a, idx_b in zip(g1, g2):
+        ef.append(
+            compute_effsize(
+                grp.get_group(labels[idx_a]),
+                grp.get_group(labels[idx_b]),
+                paired=False,
+                eftype=effsize,
+            )
+        )
 
     # Create dataframe
     stats = pd.DataFrame(
@@ -795,15 +979,13 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
 
     Notes
     -----
-    Games-Howell [1]_ is very similar to the Tukey HSD post-hoc test but is
-    much more robust to heterogeneity of variances. While the
-    Tukey-HSD post-hoc is optimal after a classic one-way ANOVA, the
-    Games-Howell is optimal after a Welch ANOVA. Please note that Games-Howell
-    is not valid for repeated measures ANOVA.
-    Only one-way ANOVA design are supported.
+    Games-Howell [1]_ is very similar to the Tukey HSD post-hoc test but is much more robust to
+    heterogeneity of variances. While the Tukey-HSD post-hoc is optimal after a classic one-way
+    ANOVA, the Games-Howell is optimal after a Welch ANOVA. Please note that Games-Howell
+    is not valid for repeated measures ANOVA. Only one-way ANOVA design are supported.
 
-    Compared to the Tukey-HSD test, the Games-Howell test uses different pooled
-    variances for each pair of variables instead of the same pooled variance.
+    Compared to the Tukey-HSD test, the Games-Howell test uses different pooled variances for
+    each pair of variables instead of the same pooled variance.
 
     The T-values are defined as:
 
@@ -820,10 +1002,9 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
         {\\frac{(\\frac{s_i^2}{n_i})^2}{n_i-1} +
         \\frac{(\\frac{s_j^2}{n_j})^2}{n_j-1}}
 
-    where :math:`\\overline{x}_i`, :math:`s_i^2`, and :math:`n_i`
-    are the mean, variance and sample size of the first group and
-    :math:`\\overline{x}_j`, :math:`s_j^2`, and :math:`n_j` the mean, variance
-    and sample size of the second group.
+    where :math:`\\overline{x}_i`, :math:`s_i^2`, and :math:`n_i` are the mean, variance and sample
+    size of the first group and :math:`\\overline{x}_j`, :math:`s_j^2`, and :math:`n_j` the mean,
+    variance and sample size of the second group.
 
     The p-values are then approximated using the Studentized range distribution
     :math:`Q(\\sqrt2|t_i|, r, v_i)`.
@@ -831,7 +1012,7 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
     References
     ----------
     .. [1] Games, Paul A., and John F. Howell. "Pairwise multiple comparison
-           procedures with unequal n’s and/or variances: a Monte Carlo study."
+           procedures with unequal n's and/or variances: a Monte Carlo study."
            Journal of Educational Statistics 1.2 (1976): 113-125.
 
     .. [2] Gleason, John R. "An accurate, non-iterative approximation for
@@ -847,9 +1028,9 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
     >>> pg.pairwise_gameshowell(data=df, dv='body_mass_g',
     ...                         between='species').round(3)
                A          B   mean(A)   mean(B)      diff      se       T       df  pval  hedges
-    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  59.706  -0.543  152.455  0.85  -0.079
-    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  58.811 -23.386  249.643  0.00  -2.833
-    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  65.103 -20.628  170.404  0.00  -3.105
+    0     Adelie  Chinstrap  3700.662  3733.088   -32.426  59.706  -0.543  152.455  0.85  -0.074
+    1     Adelie     Gentoo  3700.662  5076.016 -1375.354  58.811 -23.386  249.643  0.00  -2.860
+    2  Chinstrap     Gentoo  3733.088  5076.016 -1342.928  65.103 -20.628  170.404  0.00  -2.875
     """
     # Check the dataframe
     data = _check_dataframe(dv=dv, between=between, effects="between", data=data)
@@ -867,8 +1048,8 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
     # See https://github.com/raphaelvallat/pingouin/issues/111
     labels = np.array(list(grp.groups.keys()))
     n = grp.count().to_numpy()
-    gmeans = grp.mean().to_numpy()
-    gvars = grp.var().to_numpy()
+    gmeans = grp.mean(numeric_only=True).to_numpy()
+    gvars = grp.var().to_numpy()  # numeric_only=True added in pandas 1.5, set to False in 2.0
 
     # Pairwise combinations
     g1, g2 = np.array(list(combinations(np.arange(ng), 2))).T
@@ -888,8 +1069,20 @@ def pairwise_gameshowell(data=None, dv=None, between=None, effsize="hedges"):
     # punc = t.sf(np.abs(tval), n[g1].size + n[g2].size - 2) * 2
 
     # Effect size
-    d = tval * np.sqrt(1 / n[g1] + 1 / n[g2])
-    ef = convert_effsize(d, "cohen", effsize, n[g1], n[g2])
+    # Method 1: Approximation
+    # d = tval * np.sqrt(1 / n[g1] + 1 / n[g2])
+    # ef = convert_effsize(d, "cohen", effsize, n[g1], n[g2])
+    # Method 2: Exact
+    ef = []
+    for idx_a, idx_b in zip(g1, g2):
+        ef.append(
+            compute_effsize(
+                grp.get_group(labels[idx_a]),
+                grp.get_group(labels[idx_b]),
+                paired=False,
+                eftype=effsize,
+            )
+        )
 
     # Create dataframe
     stats = pd.DataFrame(
@@ -1133,8 +1326,7 @@ def pairwise_corr(
         """
         if isinstance(o, tree_types):
             for value in o:
-                for subvalue in traverse(value, tree_types):
-                    yield subvalue
+                yield from traverse(value, tree_types)
         else:
             yield o
 
@@ -1235,7 +1427,7 @@ def pairwise_corr(
             [c in keys for c in covar]
         ), "Covariate(s) are either not in data or not numeric."
         # And we make sure that X or Y does not contain covar
-        stats = stats[~stats[["X", "Y"]].isin(covar).any(1)]
+        stats = stats[~stats[["X", "Y"]].isin(covar).any(axis=1)]
         stats = stats.reset_index(drop=True)
         if stats.shape[0] == 0:
             raise ValueError(
